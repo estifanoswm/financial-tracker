@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Financial Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
+</head>
+<body>
+<div class="app-wrap">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div>
+      <div class="header-eyebrow">// finance tools</div>
+      <div class="header-title">Financial Tracker</div>
+      <div class="header-sub">Monthly budget planner — plan vs actual · <span id="user-email" style="color:var(--blue)"></span></div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-danger" onclick="clearMonth()">Reset Month</button>
+      <button class="btn" onclick="exportCSV()">Export CSV</button>
+      <button class="btn btn-green"><span id="save-status">☁ synced</span></button>
+      <button class="btn btn-primary" onclick="signOut()">Sign Out</button>
+    </div>
+  </div>
+
+  <!-- THEME BAR -->
+  <div class="theme-bar">
+    <span class="theme-bar-label">Theme</span>
+    <div class="swatch-row" id="swatch-row"></div>
+    <div class="theme-divider"></div>
+    <span class="theme-bar-label" style="margin-left:4px;">Custom</span>
+    <input type="color" id="custom-color" value="#0d0d0f" title="Pick your own background">
+  </div>
+
+  <!-- MONTH NAV + ACTIONS -->
+  <div class="top-row">
+    <div class="month-nav">
+      <button class="month-btn" onclick="changeMonth(-1)">‹</button>
+      <div class="month-display" id="display-month">— —</div>
+      <button class="month-btn" onclick="changeMonth(1)">›</button>
+      <div class="month-items" id="item-count">0 items</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn" onclick="askAI()">✦ AI Insights</button>
+      <button class="btn" title="Coming in Pro"><span class="pro-badge" style="margin-right:4px;">PRO</span> Import Transactions</button>
+    </div>
+  </div>
+
+  <!-- BUDGET ALERTS -->
+  <div class="alerts-row" id="alerts-row"></div>
+
+  <!-- SUMMARY CARDS -->
+  <div class="cards">
+    <div class="card">
+      <div class="card-value" id="card-income" style="color:var(--green);">$0</div>
+      <div class="card-label">Income</div>
+    </div>
+    <div class="card">
+      <div class="card-value" id="card-bills" style="color:var(--blue);">$0</div>
+      <div class="card-label">Bills</div>
+    </div>
+    <div class="card">
+      <div class="card-value" id="card-expenses" style="color:var(--amber);">$0</div>
+      <div class="card-label">Expenses</div>
+    </div>
+    <div class="card">
+      <div class="card-value" id="card-savings" style="color:var(--purple);">$0</div>
+      <div class="card-label">Savings</div>
+    </div>
+    <div class="card">
+      <div class="card-value" id="card-remaining">$0</div>
+      <div class="card-label">Remaining</div>
+    </div>
+  </div>
+
+  <!-- CHARTS -->
+  <div class="charts-row">
+    <div class="chart-panel">
+      <div class="chart-label">Planned vs Actual</div>
+      <div class="chart-wrap"><canvas id="barChart"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-label">Expenses Breakdown</div>
+      <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
+    </div>
+    <div class="chart-panel">
+      <div class="chart-label">Budget Health</div>
+      <div class="chart-wrap" style="display:flex;justify-content:center;">
+        <canvas id="donutChart"></canvas>
+        <div class="donut-center">
+          <div class="donut-val" id="donut-val" style="color:var(--green);">$0</div>
+          <div class="donut-lbl">remaining</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6-MONTH TREND -->
+  <div class="trend-panel">
+    <div class="trend-header">
+      <div class="trend-title">
+        6-month trend
+      </div>
+      <div class="trend-legend">
+        <span><span class="legend-dot" style="background:var(--green)"></span>Savings</span>
+        <span><span class="legend-dot" style="background:var(--blue)"></span>Income</span>
+      </div>
+    </div>
+    <div class="trend-wrap"><canvas id="trendChart"></canvas></div>
+  </div>
+
+  <!-- UPGRADE BANNER -->
+  <div class="upgrade-banner">
+    <div class="upgrade-text"><strong>Free plan</strong> — Upgrade to Pro for bank import, multi-currency & advanced analytics.</div>
+    <button class="btn btn-primary">View Pro Plan →</button>
+  </div>
+
+  <!-- TABLES -->
+  <div class="tables-grid fade" id="tables-container">
+    <!-- Income -->
+    <div class="table-panel">
+      <div class="table-header accent-green">Income</div>
+      <table>
+        <thead><tr><th style="width:38%">Source</th><th>Plan</th><th>Actual</th><th>Diff</th><th style="width:22px"></th></tr></thead>
+        <tbody id="tbody-income"></tbody>
+      </table>
+      <button class="add-row-btn" onclick="addEntry('income')">+ add row</button>
+    </div>
+    <!-- Bills -->
+    <div class="table-panel">
+      <div class="table-header accent-blue">Bills</div>
+      <table>
+        <thead><tr><th style="width:38%">Bill</th><th>Plan</th><th>Actual</th><th>Diff</th><th style="width:22px"></th></tr></thead>
+        <tbody id="tbody-bills"></tbody>
+      </table>
+      <button class="add-row-btn" onclick="addEntry('bills')">+ add row</button>
+    </div>
+    <!-- Expenses -->
+    <div class="table-panel">
+      <div class="table-header accent-amber">Expenses</div>
+      <table>
+        <thead><tr><th style="width:38%">Category</th><th>Plan</th><th>Actual</th><th>Diff</th><th style="width:22px"></th></tr></thead>
+        <tbody id="tbody-expenses"></tbody>
+      </table>
+      <button class="add-row-btn" onclick="addEntry('expenses')">+ add row</button>
+    </div>
+    <!-- Savings -->
+    <div class="table-panel">
+      <div class="table-header accent-purple">Savings</div>
+      <table>
+        <thead><tr><th style="width:38%">Fund / Debt</th><th>Plan</th><th>Actual</th><th>Diff</th><th style="width:22px"></th></tr></thead>
+        <tbody id="tbody-savings"></tbody>
+      </table>
+      <button class="add-row-btn" onclick="addEntry('savings')">+ add row</button>
+    </div>
+  </div>
+
+  <!-- BOTTOM BAR -->
+  <div class="bottom-bar">
+    <span class="footer-name">ESTIFANOS.DEV · FINANCE</span>
+    <span style="font-family:var(--mono);font-size:10px;color:var(--text3);">v2.0 · cloud sync enabled</span>
+  </div>
+
+</div>
+
+<script>
+  function askAI() {
+    const income   = document.getElementById('card-income').textContent;
+    const expenses = document.getElementById('card-expenses').textContent;
+    const rem      = document.getElementById('card-remaining').textContent;
+    const month    = document.getElementById('display-month').textContent;
+    alert(`AI Insights coming in next version!\n\nFor now, here's a quick summary:\nMonth: ${month}\nIncome: ${income} | Expenses: ${expenses} | Remaining: ${rem}`);
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Financial Tracker — Sign In</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+</head>
+<body>
+  <div class="auth-page">
+    <div class="auth-card">
+      <div class="auth-eyebrow">// finance tools</div>
+      <div class="auth-title" id="form-title">Welcome back</div>
+      <div class="auth-sub"  id="form-sub">Sign in to your financial tracker</div>
+
+      <div class="auth-error" id="auth-error"></div>
+
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" id="email" placeholder="you@example.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+      </div>
+
+      <button class="auth-submit" id="auth-btn" onclick="handleAuth()">Sign In</button>
+
+      <div class="auth-toggle">
+        <span id="toggle-text">Don't have an account?</span>
+        <a onclick="toggleMode()" id="toggle-link">Create one</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+  let isSignUp = false;
+
+  window.addEventListener('DOMContentLoaded', requireGuest);
+
+  document.addEventListener('keydown', e => { if (e.key === 'Enter') handleAuth(); });
+
+  function toggleMode() {
+    isSignUp = !isSignUp;
+    document.getElementById('form-title').textContent = isSignUp ? 'Create account' : 'Welcome back';
+    document.getElementById('form-sub').textContent   = isSignUp ? 'Start tracking your finances' : 'Sign in to your financial tracker';
+    document.getElementById('auth-btn').textContent   = isSignUp ? 'Create Account' : 'Sign In';
+    document.getElementById('toggle-text').textContent = isSignUp ? 'Already have an account?' : "Don't have an account?";
+    document.getElementById('toggle-link').textContent = isSignUp ? 'Sign in' : 'Create one';
+    hideError();
+  }
+
+  async function handleAuth() {
+    const email    = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const btn      = document.getElementById('auth-btn');
+
+    if (!email || !password) return showError('Please fill in all fields.');
+
+    btn.disabled = true;
+    btn.textContent = isSignUp ? 'Creating account…' : 'Signing in…';
+    hideError();
+
+    try {
+      if (isSignUp) {
+        await signUp(email, password);
+        showError('Check your email to confirm your account, then sign in.', 'info');
+      } else {
+        await signIn(email, password);
+        window.location.href = 'app.html';
+      }
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = isSignUp ? 'Create Account' : 'Sign In';
+    }
+  }
+
+  function showError(msg, type='error') {
+    const el = document.getElementById('auth-error');
+    el.textContent = msg;
+    el.style.display = 'block';
+    if (type === 'info') { el.style.background = 'var(--blue-dim)'; el.style.borderColor = 'var(--blue)'; el.style.color = 'var(--blue)'; }
+    else { el.style.background = 'var(--red-dim)'; el.style.borderColor = 'var(--red)'; el.style.color = 'var(--red)'; }
+  }
+  function hideError() { document.getElementById('auth-error').style.display = 'none'; }
+</script>
+</body>
+</html>
