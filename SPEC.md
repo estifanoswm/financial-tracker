@@ -25,7 +25,7 @@ v1 is single-user per account. No shared budgets, no bank sync, no business ledg
 | F1 | Sign up and log in | Email magic link and Google. No passwords. |
 | F2 | Quick setup | 3-step onboarding: accounts, income sources, categories. |
 | F3 | Accounts | Chequing, savings, credit card, cash. Opening balance and date. |
-| F4 | Income sources | One or many (Job A, Job B, ...). Each has its own pay schedule and expected amount. Expected pay shows before it lands. |
+| F4 | Income sources | One or many, in two kinds: Jobs (Job A, Job B, ...) and Other income (Source A, Source B, ...). Each has its own pay schedule and expected amount, and a job can pay several times a month. Expected pay shows before it lands. |
 | F5 | Categories | Four buckets: Income, Bills, Expenses, Savings and Debt. Starter set, fully editable. |
 | F6 | Add a transaction | Under 5 seconds on a phone: amount, category, account, date, note. |
 | F7 | Transaction list | Search, filter by month, category, account. Edit and delete. |
@@ -33,7 +33,7 @@ v1 is single-user per account. No shared budgets, no bank sync, no business ledg
 | F9 | Bank CSV import | Column mapping saved per bank, duplicate skipping, rule-based categorization, review before saving. |
 | F10 | Monthly budget | Planned amount per category, actuals computed from transactions, copy last month. |
 | F11 | Dashboard | Summary cards, plan vs actual, spending breakdown, budget health, upcoming bills and paydays. |
-| F12 | Balance forecast | End-of-month balance for the current month and next 5. |
+| F12 | Balance forecast | Month-by-month ledger matching the forecasting spreadsheet: income, expenses, net, forecasted end balance, bank statement balance, and the difference. Past months, the current month, and the next 5. |
 | F13 | Match my bank (reconcile) | Enter a statement balance; see the gap and the transactions that may explain it. |
 | F14 | Export | CSV of transactions; CSV of a month's budget; full JSON export of all data. |
 | F15 | Works on phone | PWA, installable, responsive down to 360 px wide. |
@@ -123,6 +123,7 @@ All tables: `id uuid primary key default gen_random_uuid()`, `user_id uuid not n
 ### Enums
 - `account_type`: `chequing`, `savings`, `credit_card`, `cash`
 - `bucket`: `income`, `bill`, `expense`, `savings_debt`
+- `income_kind`: `job`, `other`
 - `income_cadence`: `weekly`, `biweekly`, `semimonthly`, `monthly`, `irregular`
 - `bill_cadence`: `weekly`, `biweekly`, `monthly`, `quarterly`, `yearly`
 - `rule_match`: `contains`, `starts_with`, `equals`, `regex`
@@ -167,6 +168,7 @@ All tables: `id uuid primary key default gen_random_uuid()`, `user_id uuid not n
 | name | text not null | e.g. "Job A" |
 | account_id | uuid not null | where pay lands |
 | category_id | uuid not null | income bucket; created automatically with the same name |
+| kind | income_kind not null default 'job' | `job` defaults to "Job A", "Job B"; `other` defaults to "Source A", "Source B" |
 | cadence | income_cadence not null | |
 | anchor_date | date not null | a real past or next payday |
 | semimonthly_day_1 | smallint null | 1 to 31, default 15 |
@@ -326,13 +328,34 @@ for each month m from the current month through 5 months ahead:
   variable = sum over expense categories of max(planned(m, c) - spentSoFar(m, c), 0)
   savings  = sum over savings_debt categories with no recurring bill of max(planned(m, c) - spentSoFar(m, c), 0)
   end(m)   = start(m) + income - bills - variable - savings
-  start(m+1) = end(m)
+  start(m+1) = statement(m) if the user entered one, else end(m)
 ```
+- `statement(m)`: the sum over pool accounts of the `balance_snapshots` dated on the last day of month m. Use it only when every pool account has a snapshot for that date. This mirrors the spreadsheet: once the real bank balance for a month is known, the next month's forecast starts from it, not from the earlier forecast.
 - `planned(m, c)`: the budget row for that month; if none, the most recent earlier budget row for that category; if none, 0.
 - `spentSoFar` is only non-zero for the current month.
 - Income landing in a non-pool account is ignored.
 - Each month returns `{ month, start, income, bills, variable, savings, end, estimated: boolean }`. `estimated` is true if any irregular income contributed.
 - A month whose `end` is below 0 is flagged `belowZero`.
+
+### 7.5b `computeMonthlyLedger({ firstMonth, today, ...forecastInputs })`
+One row per month from `firstMonth` (the month of the earliest pool account `opening_date`) through 5 months after the current month. Same layout as the forecasting spreadsheet:
+
+| Row | Past months | Current and future months |
+|---|---|---|
+| Income: per job, per other source, total | actuals from transactions, grouped by `income_source_id` (unmatched income transactions under "Other income") | expected, as in 7.5 |
+| Fixed expenses (bills bucket) | actuals | expected, as in 7.5 |
+| Variable expenses (expense bucket) | actuals | planned remainder, as in 7.5 |
+| Savings and debt | actuals | planned remainder, as in 7.5 |
+| Net | income minus all expense rows | same |
+| Forecasted end balance | `startingBalance(m) + net(m)` | `end(m)` from 7.5 |
+| Bank statement balance | `statement(m)`, blank if not entered | blank until entered |
+| Difference | `forecasted - statement`, blank if no statement | same |
+
+```
+startingBalance(firstMonth) = sum of opening_balance_cents over the pool
+startingBalance(m) = statement(m-1) if entered, else forecasted(m-1)
+```
+A non-zero difference on a past month means missing, duplicate or miscategorized transactions; link it to the reconcile panel for that month end.
 
 ### 7.6 `computeReconciliation({ account, transactions, snapshot, lastReconciledSnapshot })`
 ```
@@ -360,7 +383,8 @@ Rules sorted by `priority` then `created_at`. First match wins. Matching is case
 - Pay dates: biweekly across a year boundary; semimonthly 15 and 31 in February (28 and 29 days); monthly on the 31st; weekend shift to Friday; `ended_on` respected; inactive source yields nothing.
 - Bills: quarterly from Nov 30 clamps to Feb 28 or 29.
 - Actuals: refunds reduce spend; transfers excluded; savings transfer leg counted once; uncategorized reported.
-- Forecast: one income source; three income sources on different cadences; income into a non-pool account ignored; late paycheque included; no budget rows falls back to the previous month; `belowZero` flag.
+- Forecast: one income source; three income sources on different cadences; income into a non-pool account ignored; late paycheque included; no budget rows falls back to the previous month; `belowZero` flag; a month-end statement replaces the carried forecast as the next month's start.
+- Ledger: two past months with statements entered show the correct difference; a past month without a statement carries the forecast forward; income grouped by job and other source.
 - Reconcile: exact match gives gap 0; duplicate detection; single-transaction gap suspect.
 - CSV: debit/credit split; parentheses negatives; `CR`/`DR`; identical rows in one file both import; re-import of the same file imports 0.
 - Money: `parseMoney` and `formatMoney` in `en-CA` and `fr-CA` (`1 234,56 $`).
@@ -377,7 +401,7 @@ Email field with "Send me a link" and a "Continue with Google" button. Links to 
 ### Onboarding (`/onboarding`)
 Shown until `profiles.onboarded_at` is set. Three steps with a progress indicator, each skippable except step 1.
 1. **Accounts:** add at least one. Name, type, current balance, as-of date (default today).
-2. **Income:** add zero or more sources. Name defaults to "Job A", then "Job B", and so on. Account, cadence, a recent or next payday, amount per paycheque. "Add another income" button.
+2. **Income:** two groups, Jobs and Other income, each with an "Add" button. Jobs default to "Job A", "Job B", and so on; other income defaults to "Source A", "Source B". Each has account, cadence, a recent or next payday, and amount per paycheque. Zero or more of each.
 3. **Categories:** starter set shown grouped by bucket with checkboxes; user unticks what they don't need. Finish seeds categories, creates income categories, sets the current month's budget to 0 for each, and sets `onboarded_at`.
 
 ### Dashboard (`/dashboard`)
@@ -408,8 +432,9 @@ For the selected month:
 - Bills section pre-fills from recurring bills for that month.
 
 ### Forecast (`/forecast`)
-- Line chart of end-of-month balance for 6 months, with a zero line.
-- Table below: Month, Start, Income, Bills, Planned spending, Savings, End. Estimated months marked.
+- Line chart of forecasted end balance per month, with bank statement balances as dots on the same chart and a zero line.
+- Ledger table from `computeMonthlyLedger` (7.5b), months as columns like the spreadsheet: income by job and other source (collapsible), total income, fixed expenses, variable expenses, savings and debt, total expenses, net, forecasted end balance, bank statement balance, difference. Past months read-only; estimated months marked.
+- "Enter statement balance" on any month end opens a small form per pool account and saves `balance_snapshots` dated the last day of that month.
 - Breakdown drawer per month: each expected paycheque and bill by date.
 - Explainer text: which accounts are in the pool, with a link to change it.
 
@@ -530,7 +555,7 @@ Each phase is one Claude Code session. Start in plan mode, approve the plan, the
 
 ### Phase 6: Forecast and reconcile
 **Prompt:**
-> Implement `forecast.ts` and `reconcile.ts` from section 7 with their tests first. Build the Forecast page, the forecast strip on the Dashboard, the forecast pool setting, and the Reconcile panel on account detail with suspect actions. Plan first.
+> Implement `forecast.ts` (7.5 and the ledger in 7.5b) and `reconcile.ts` from section 7 with their tests first. Build the Forecast page with the monthly ledger and month-end statement entry, the forecast strip on the Dashboard, the forecast pool setting, and the Reconcile panel on account detail with suspect actions. Plan first.
 
 **Done when:** a seeded scenario with Job A biweekly, Job B semimonthly and Job C irregular produces the expected 6-month table in a unit test, and reconciliation reaches gap 0 after fixing a seeded duplicate.
 
