@@ -1,0 +1,8 @@
+{
+  "name": "financial-tracker",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build-config.mjs",
+    "dev": "node scripts/build-config.mjs && npx --yes serve -l 3000 ."
+  }
+}

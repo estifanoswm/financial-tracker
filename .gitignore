@@ -1,0 +1,6 @@
+.env*
+!.env.example
+js/config.js
+node_modules/
+.vercel/
+.DS_Store
